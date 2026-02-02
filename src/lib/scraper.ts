@@ -1,11 +1,14 @@
 import type { Post } from './db';
 
 // List of public Nitter instances to try (in order of preference)
+// Updated from https://gist.github.com/cmj/7dace466c983e07d4e3b13be4b786c29
 const NITTER_INSTANCES = [
-  'https://nitter.privacydev.net',
+  'https://xcancel.com',
   'https://nitter.poast.org',
-  'https://nitter.woodland.cafe',
-  'https://nitter.1d4.us',
+  'https://nitter.privacydev.net',
+  'https://twitt.re',
+  'https://nitter.pek.li',
+  'https://nitter.aosus.link',
 ];
 
 interface ScrapedPost {
