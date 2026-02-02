@@ -1,6 +1,23 @@
-import { neon } from '@neondatabase/serverless';
+import { neon, type NeonQueryFunction } from '@neondatabase/serverless';
 
-const sql = neon(import.meta.env.DATABASE_URL || process.env.DATABASE_URL!);
+let _sql: NeonQueryFunction<false, false> | null = null;
+
+function getDb() {
+  if (_sql) return _sql;
+
+  const url = import.meta.env.DATABASE_URL || process.env.DATABASE_URL;
+  if (!url) {
+    throw new Error('DATABASE_URL is not set. Add Neon Postgres in Vercel Storage tab.');
+  }
+
+  _sql = neon(url);
+  return _sql;
+}
+
+const sql = new Proxy({} as NeonQueryFunction<false, false>, {
+  apply: (_, __, args) => getDb()(args[0] as TemplateStringsArray, ...args.slice(1)),
+  get: (_, prop) => (getDb() as any)[prop],
+});
 
 export interface Post {
   id: number;
