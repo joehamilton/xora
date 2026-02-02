@@ -1,6 +1,6 @@
 import type { APIRoute } from 'astro';
 import { initDb, upsertPost } from '../../lib/db';
-import { scrapeZoraMentions, getAuthorFollowers } from '../../lib/scraper';
+import { scrapeZoraMentions } from '../../lib/scraper';
 
 export const GET: APIRoute = async ({ request }) => {
   // Verify cron secret in production
@@ -18,8 +18,9 @@ export const GET: APIRoute = async ({ request }) => {
     // Initialize database tables if they don't exist
     await initDb();
 
-    // Scrape posts from Nitter
-    const { posts, instance, error } = await scrapeZoraMentions();
+    // Scrape posts from SocialData.tools API
+    // Limit to 20 posts per scrape to conserve credits
+    const { posts, error, creditsUsed } = await scrapeZoraMentions(20);
 
     if (error) {
       return new Response(JSON.stringify({ error, posts: 0 }), {
@@ -28,35 +29,20 @@ export const GET: APIRoute = async ({ request }) => {
       });
     }
 
-    // Fetch follower counts for unique authors (with rate limiting)
-    const uniqueAuthors = [...new Set(posts.map(p => p.author_handle))];
-    const followerCounts: Record<string, number> = {};
-
-    for (const handle of uniqueAuthors.slice(0, 10)) {
-      // Limit to 10 to avoid rate limits
-      followerCounts[handle] = await getAuthorFollowers(handle);
-      // Small delay between requests
-      await new Promise(resolve => setTimeout(resolve, 500));
-    }
-
     // Upsert posts to database
     let savedCount = 0;
     for (const post of posts) {
-      const postWithFollowers = {
-        ...post,
-        author_followers: followerCounts[post.author_handle] || 0,
-      };
-
-      await upsertPost(postWithFollowers);
+      await upsertPost(post);
       savedCount++;
     }
 
     return new Response(
       JSON.stringify({
         success: true,
-        instance,
+        source: 'socialdata.tools',
         scraped: posts.length,
         saved: savedCount,
+        creditsUsed,
         timestamp: new Date().toISOString(),
       }),
       {

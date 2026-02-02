@@ -1,17 +1,32 @@
-import type { Post } from './db';
+// SocialData.tools API for Twitter/X search
+// Docs: https://docs.socialdata.tools/reference/get-search-results/
 
-// List of public Nitter instances to try (in order of preference)
-// Updated from https://gist.github.com/cmj/7dace466c983e07d4e3b13be4b786c29
-const NITTER_INSTANCES = [
-  'https://xcancel.com',
-  'https://nitter.poast.org',
-  'https://nitter.privacydev.net',
-  'https://twitt.re',
-  'https://nitter.pek.li',
-  'https://nitter.aosus.link',
-];
+const SOCIALDATA_API_URL = 'https://api.socialdata.tools/twitter/search';
 
-interface ScrapedPost {
+interface SocialDataTweet {
+  id_str: string;
+  full_text: string;
+  tweet_created_at: string;
+  favorite_count: number;
+  retweet_count: number;
+  reply_count: number;
+  quote_count: number;
+  views_count: number;
+  user: {
+    id_str: string;
+    name: string;
+    screen_name: string;
+    profile_image_url_https: string;
+    followers_count: number;
+  };
+}
+
+interface SocialDataResponse {
+  tweets: SocialDataTweet[];
+  next_cursor?: string;
+}
+
+export interface ScrapedPost {
   x_post_id: string;
   content: string;
   author_handle: string;
@@ -25,188 +40,76 @@ interface ScrapedPost {
   created_at: Date;
 }
 
-async function fetchWithTimeout(url: string, timeout = 10000): Promise<Response> {
-  const controller = new AbortController();
-  const id = setTimeout(() => controller.abort(), timeout);
+function getApiKey(): string {
+  const key = import.meta.env.SOCIALDATA_API_KEY || process.env.SOCIALDATA_API_KEY;
+  if (!key) {
+    throw new Error('SOCIALDATA_API_KEY is not set. Add it in Vercel Environment Variables.');
+  }
+  return key;
+}
 
+export async function scrapeZoraMentions(maxResults = 20): Promise<{
+  posts: ScrapedPost[];
+  error?: string;
+  creditsUsed?: number;
+}> {
   try {
+    const apiKey = getApiKey();
+
+    // Search for @zora mentions
+    const query = encodeURIComponent('@zora');
+    const url = `${SOCIALDATA_API_URL}?query=${query}&type=Latest`;
+
     const response = await fetch(url, {
-      signal: controller.signal,
       headers: {
-        'User-Agent': 'Mozilla/5.0 (compatible; xora/1.0)',
+        'Authorization': `Bearer ${apiKey}`,
+        'Accept': 'application/json',
       },
     });
-    clearTimeout(id);
-    return response;
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('SocialData API error:', response.status, errorText);
+      return {
+        posts: [],
+        error: `API error: ${response.status} - ${errorText}`
+      };
+    }
+
+    const data: SocialDataResponse = await response.json();
+
+    // Transform to our format
+    const posts: ScrapedPost[] = data.tweets.slice(0, maxResults).map(tweet => ({
+      x_post_id: tweet.id_str,
+      content: tweet.full_text,
+      author_handle: tweet.user.screen_name,
+      author_name: tweet.user.name,
+      author_avatar: tweet.user.profile_image_url_https || null,
+      author_followers: tweet.user.followers_count,
+      like_count: tweet.favorite_count,
+      repost_count: tweet.retweet_count + tweet.quote_count,
+      reply_count: tweet.reply_count,
+      post_url: `https://x.com/${tweet.user.screen_name}/status/${tweet.id_str}`,
+      created_at: new Date(tweet.tweet_created_at),
+    }));
+
+    console.log(`Fetched ${posts.length} posts from SocialData.tools`);
+
+    return {
+      posts,
+      creditsUsed: data.tweets.length // ~1 credit per tweet
+    };
   } catch (error) {
-    clearTimeout(id);
-    throw error;
+    console.error('SocialData scrape error:', error);
+    return {
+      posts: [],
+      error: error instanceof Error ? error.message : 'Unknown error'
+    };
   }
 }
 
-function parseCount(text: string): number {
-  if (!text) return 0;
-  text = text.trim().toLowerCase();
-
-  if (text.includes('k')) {
-    return Math.round(parseFloat(text.replace('k', '')) * 1000);
-  }
-  if (text.includes('m')) {
-    return Math.round(parseFloat(text.replace('m', '')) * 1000000);
-  }
-  return parseInt(text.replace(/,/g, '')) || 0;
-}
-
-function parseRelativeTime(text: string): Date {
-  const now = new Date();
-  text = text.trim().toLowerCase();
-
-  if (text.includes('s ago') || text.includes('sec')) {
-    const seconds = parseInt(text) || 0;
-    return new Date(now.getTime() - seconds * 1000);
-  }
-  if (text.includes('m ago') || text.includes('min')) {
-    const minutes = parseInt(text) || 0;
-    return new Date(now.getTime() - minutes * 60 * 1000);
-  }
-  if (text.includes('h ago') || text.includes('hour')) {
-    const hours = parseInt(text) || 0;
-    return new Date(now.getTime() - hours * 60 * 60 * 1000);
-  }
-  if (text.includes('d ago') || text.includes('day')) {
-    const days = parseInt(text) || 0;
-    return new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
-  }
-
-  // Try to parse as absolute date
-  const parsed = new Date(text);
-  if (!isNaN(parsed.getTime())) {
-    return parsed;
-  }
-
-  return now;
-}
-
-function extractPostsFromHtml(html: string, instanceUrl: string): ScrapedPost[] {
-  const posts: ScrapedPost[] = [];
-
-  // Match timeline items - Nitter uses .timeline-item class
-  const timelineItemRegex = /<div class="timeline-item[^"]*"[^>]*>([\s\S]*?)<\/div>\s*<\/div>\s*<\/div>/g;
-  let match;
-
-  while ((match = timelineItemRegex.exec(html)) !== null) {
-    try {
-      const item = match[1];
-
-      // Extract post ID from tweet-link
-      const postIdMatch = item.match(/href="\/([^/]+)\/status\/(\d+)/);
-      if (!postIdMatch) continue;
-
-      const authorHandle = postIdMatch[1];
-      const postId = postIdMatch[2];
-
-      // Extract author name
-      const authorNameMatch = item.match(/class="fullname"[^>]*>([^<]+)/);
-      const authorName = authorNameMatch ? authorNameMatch[1].trim() : authorHandle;
-
-      // Extract avatar
-      const avatarMatch = item.match(/class="avatar[^"]*"[^>]*src="([^"]+)"/);
-      const authorAvatar = avatarMatch ? avatarMatch[1] : null;
-
-      // Extract content
-      const contentMatch = item.match(/class="tweet-content[^"]*"[^>]*>([\s\S]*?)<\/div>/);
-      let content = contentMatch ? contentMatch[1] : '';
-      // Strip HTML tags from content
-      content = content.replace(/<[^>]+>/g, '').trim();
-
-      // Extract stats
-      const likesMatch = item.match(/class="icon-heart"[^>]*><\/span>\s*(\d+[KkMm]?)/);
-      const repostsMatch = item.match(/class="icon-retweet"[^>]*><\/span>\s*(\d+[KkMm]?)/);
-      const repliesMatch = item.match(/class="icon-comment"[^>]*><\/span>\s*(\d+[KkMm]?)/);
-
-      const likeCount = likesMatch ? parseCount(likesMatch[1]) : 0;
-      const repostCount = repostsMatch ? parseCount(repostsMatch[1]) : 0;
-      const replyCount = repliesMatch ? parseCount(repliesMatch[1]) : 0;
-
-      // Extract timestamp
-      const timeMatch = item.match(/class="tweet-date"[^>]*>.*?title="([^"]+)"/);
-      const createdAt = timeMatch ? new Date(timeMatch[1]) : new Date();
-
-      if (content && postId) {
-        posts.push({
-          x_post_id: postId,
-          content,
-          author_handle: authorHandle,
-          author_name: authorName,
-          author_avatar: authorAvatar,
-          author_followers: 0, // Would need separate request to get this
-          like_count: likeCount,
-          repost_count: repostCount,
-          reply_count: replyCount,
-          post_url: `https://x.com/${authorHandle}/status/${postId}`,
-          created_at: createdAt,
-        });
-      }
-    } catch (e) {
-      // Skip malformed posts
-      console.error('Failed to parse post:', e);
-    }
-  }
-
-  return posts;
-}
-
-export async function scrapeZoraMentions(): Promise<{ posts: ScrapedPost[]; instance: string | null; error?: string }> {
-  for (const instance of NITTER_INSTANCES) {
-    try {
-      console.log(`Trying Nitter instance: ${instance}`);
-
-      // Search for @zora mentions
-      const searchUrl = `${instance}/search?f=tweets&q=%40zora`;
-      const response = await fetchWithTimeout(searchUrl, 15000);
-
-      if (!response.ok) {
-        console.log(`Instance ${instance} returned ${response.status}`);
-        continue;
-      }
-
-      const html = await response.text();
-
-      // Check if we got blocked or rate limited
-      if (html.includes('rate limit') || html.includes('blocked') || html.length < 1000) {
-        console.log(`Instance ${instance} appears to be rate limited or blocked`);
-        continue;
-      }
-
-      const posts = extractPostsFromHtml(html, instance);
-      console.log(`Found ${posts.length} posts from ${instance}`);
-
-      if (posts.length > 0) {
-        return { posts, instance };
-      }
-    } catch (error) {
-      console.error(`Failed to fetch from ${instance}:`, error);
-    }
-  }
-
-  return { posts: [], instance: null, error: 'All Nitter instances failed' };
-}
-
+// Simplified - we get follower counts directly from the search results now
 export async function getAuthorFollowers(handle: string): Promise<number> {
-  for (const instance of NITTER_INSTANCES) {
-    try {
-      const response = await fetchWithTimeout(`${instance}/${handle}`, 10000);
-      if (!response.ok) continue;
-
-      const html = await response.text();
-      const followersMatch = html.match(/class="followers"[^>]*>.*?(\d+[KkMm,.\d]*)/s);
-
-      if (followersMatch) {
-        return parseCount(followersMatch[1]);
-      }
-    } catch {
-      continue;
-    }
-  }
+  // No longer needed - SocialData includes follower count in search results
   return 0;
 }
