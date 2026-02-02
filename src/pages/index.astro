@@ -1,0 +1,102 @@
+---
+import Layout from '../layouts/Layout.astro';
+import PostCard from '../components/PostCard.astro';
+import { getPosts, getPostCount } from '../lib/db';
+
+let posts = [];
+let totalCount = 0;
+let error = null;
+
+try {
+  posts = await getPosts(50);
+  totalCount = await getPostCount();
+} catch (e) {
+  error = e instanceof Error ? e.message : 'Failed to load posts';
+  console.error('Failed to fetch posts:', e);
+}
+---
+
+<Layout title="xora - @zora mentions on X">
+  {error ? (
+    <div class="error-state">
+      <p>Unable to load posts</p>
+      <p class="error-detail">{error}</p>
+      <a href="/api/init" class="init-link">Initialize database →</a>
+    </div>
+  ) : posts.length === 0 ? (
+    <div class="empty-state">
+      <p>No posts yet</p>
+      <p class="empty-detail">Posts mentioning @zora will appear here once the scraper runs.</p>
+      <a href="/api/scrape" class="scrape-link">Run scraper manually →</a>
+    </div>
+  ) : (
+    <>
+      <div class="stats-bar">
+        <span>{totalCount} posts tracked</span>
+      </div>
+      <div class="timeline">
+        {posts.map((post) => (
+          <PostCard post={post} />
+        ))}
+      </div>
+    </>
+  )}
+</Layout>
+
+<style>
+  .stats-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1.5rem;
+    padding: 0.75rem 1rem;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 0.85rem;
+    color: var(--text-muted);
+  }
+
+  .timeline {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .empty-state,
+  .error-state {
+    text-align: center;
+    padding: 3rem 1rem;
+    color: var(--text-muted);
+  }
+
+  .empty-state p:first-child,
+  .error-state p:first-child {
+    font-size: 1.1rem;
+    color: var(--text);
+    margin-bottom: 0.5rem;
+  }
+
+  .empty-detail,
+  .error-detail {
+    font-size: 0.9rem;
+    margin-bottom: 1rem;
+  }
+
+  .scrape-link,
+  .init-link {
+    display: inline-block;
+    margin-top: 1rem;
+    padding: 0.5rem 1rem;
+    background: var(--accent);
+    color: white;
+    text-decoration: none;
+    border-radius: 6px;
+    font-size: 0.9rem;
+  }
+
+  .scrape-link:hover,
+  .init-link:hover {
+    opacity: 0.9;
+  }
+</style>

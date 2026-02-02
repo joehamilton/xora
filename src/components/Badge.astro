@@ -1,0 +1,88 @@
+---
+interface Props {
+  type: 'likes' | 'followers';
+  count: number;
+}
+
+const { type, count } = Astro.props;
+
+function getLikeBadge(count: number): { label: string; class: string } | null {
+  if (count >= 1000) return { label: '1K+ likes', class: 'badge-gold' };
+  if (count >= 100) return { label: '100+ likes', class: 'badge-silver' };
+  if (count >= 10) return { label: '10+ likes', class: 'badge-bronze' };
+  return null;
+}
+
+function getFollowerBadge(count: number): { label: string; class: string } | null {
+  if (count >= 100000) return { label: '100K+', class: 'badge-100k' };
+  if (count >= 10000) return { label: '10K+', class: 'badge-10k' };
+  if (count >= 1000) return { label: '1K+', class: 'badge-1k' };
+  return null;
+}
+
+const badge = type === 'likes' ? getLikeBadge(count) : getFollowerBadge(count);
+---
+
+{badge && (
+  <span class={`badge ${badge.class}`}>
+    {type === 'followers' && <span class="badge-icon">👤</span>}
+    {type === 'likes' && <span class="badge-icon">❤️</span>}
+    {badge.label}
+  </span>
+)}
+
+<style>
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.2rem 0.5rem;
+    border-radius: 9999px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+  }
+
+  .badge-icon {
+    font-size: 0.65rem;
+  }
+
+  /* Like badges */
+  .badge-bronze {
+    background: rgba(205, 127, 50, 0.2);
+    color: var(--badge-bronze);
+    border: 1px solid rgba(205, 127, 50, 0.3);
+  }
+
+  .badge-silver {
+    background: rgba(192, 192, 192, 0.2);
+    color: var(--badge-silver);
+    border: 1px solid rgba(192, 192, 192, 0.3);
+  }
+
+  .badge-gold {
+    background: rgba(255, 215, 0, 0.2);
+    color: var(--badge-gold);
+    border: 1px solid rgba(255, 215, 0, 0.3);
+  }
+
+  /* Follower badges */
+  .badge-1k {
+    background: rgba(34, 197, 94, 0.2);
+    color: var(--badge-follower-1k);
+    border: 1px solid rgba(34, 197, 94, 0.3);
+  }
+
+  .badge-10k {
+    background: rgba(139, 92, 246, 0.2);
+    color: var(--badge-follower-10k);
+    border: 1px solid rgba(139, 92, 246, 0.3);
+  }
+
+  .badge-100k {
+    background: rgba(236, 72, 153, 0.2);
+    color: var(--badge-follower-100k);
+    border: 1px solid rgba(236, 72, 153, 0.3);
+  }
+</style>
