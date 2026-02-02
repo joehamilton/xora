@@ -1,23 +1,12 @@
-import { neon, type NeonQueryFunction } from '@neondatabase/serverless';
-
-let _sql: NeonQueryFunction<false, false> | null = null;
+import { neon } from '@neondatabase/serverless';
 
 function getDb() {
-  if (_sql) return _sql;
-
   const url = import.meta.env.DATABASE_URL || process.env.DATABASE_URL;
   if (!url) {
     throw new Error('DATABASE_URL is not set. Add Neon Postgres in Vercel Storage tab.');
   }
-
-  _sql = neon(url);
-  return _sql;
+  return neon(url);
 }
-
-const sql = new Proxy({} as NeonQueryFunction<false, false>, {
-  apply: (_, __, args) => getDb()(args[0] as TemplateStringsArray, ...args.slice(1)),
-  get: (_, prop) => (getDb() as any)[prop],
-});
 
 export interface Post {
   id: number;
@@ -36,6 +25,7 @@ export interface Post {
 }
 
 export async function initDb() {
+  const sql = getDb();
   await sql`
     CREATE TABLE IF NOT EXISTS posts (
       id SERIAL PRIMARY KEY,
@@ -64,6 +54,7 @@ export async function initDb() {
 }
 
 export async function getPosts(limit = 50, offset = 0): Promise<Post[]> {
+  const sql = getDb();
   const result = await sql`
     SELECT * FROM posts
     ORDER BY created_at DESC
@@ -73,6 +64,7 @@ export async function getPosts(limit = 50, offset = 0): Promise<Post[]> {
 }
 
 export async function upsertPost(post: Omit<Post, 'id' | 'scraped_at'>) {
+  const sql = getDb();
   await sql`
     INSERT INTO posts (
       x_post_id, content, author_handle, author_name, author_avatar,
@@ -91,6 +83,7 @@ export async function upsertPost(post: Omit<Post, 'id' | 'scraped_at'>) {
 }
 
 export async function getPostCount(): Promise<number> {
+  const sql = getDb();
   const result = await sql`SELECT COUNT(*) as count FROM posts`;
   return parseInt(result[0].count);
 }
